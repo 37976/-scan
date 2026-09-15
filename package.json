@@ -1,0 +1,12 @@
+{
+  "name": "pocketscan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "build": "node scripts/verify-build.mjs",
+    "preview": "node server.mjs",
+    "test": "node --test"
+  }
+}

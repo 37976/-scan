@@ -1,0 +1,10 @@
+{
+  "name": "掌上扫描 PocketScan",
+  "short_name": "掌上扫描",
+  "description": "离线扫描文档并导出 PDF",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f1e8",
+  "theme_color": "#f5f1e8",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

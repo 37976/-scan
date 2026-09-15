@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000" viewBox="0 0 800 1000">
+  <rect width="800" height="1000" fill="#343a3b"/>
+  <path d="M155 90 L690 165 L745 900 L70 850 Z" fill="#f5f1e6"/>
+  <g fill="none" stroke="#202525" stroke-width="5">
+    <path d="M190 220 L650 265"/><path d="M175 310 L662 345"/><path d="M158 400 L675 425"/>
+    <path d="M140 500 L690 515"/><path d="M120 610 L705 610"/><path d="M100 730 L720 710"/>
+  </g>
+  <text x="215" y="180" font-family="sans-serif" font-size="42" fill="#202525" transform="rotate(6 215 180)">自动透视校正测试</text>
+</svg>
