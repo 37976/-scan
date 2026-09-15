@@ -32,7 +32,7 @@ import java.util.List;
 
 @CapacitorPlugin(name = "Scanner")
 public class ScannerPlugin extends Plugin {
-    private static final int MAX_SIDE = 2400;
+    private static final int MAX_SIDE = 1800;
     private boolean openCvReady;
 
     @Override
@@ -47,7 +47,7 @@ public class ScannerPlugin extends Plugin {
 
     @PluginMethod
     public void restore(PluginCall call) {
-        runInBackground(call, () -> restoreDocument(decode(call.getString("image"))));
+        runInBackground(call, () -> restoreDocument(warpDocument(decode(call.getString("image")), call)));
     }
 
     private interface Work { JSObject run() throws Exception; }
@@ -193,7 +193,11 @@ public class ScannerPlugin extends Plugin {
         clip(normalized, 0, 255);
         boolean ghostCorrection = focusScore < 280;
         if (ghostCorrection) {
-            Mat corrected = deghost(normalized, focusScore);
+            Mat soft = new Mat(), corrected = new Mat();
+            Imgproc.GaussianBlur(normalized, soft, new Size(0, 0), .9);
+            Core.addWeighted(normalized, 1.16, soft, -.16, 0, corrected);
+            clip(corrected, 0, 255);
+            soft.release();
             normalized.release(); normalized = corrected;
         }
 
@@ -268,6 +272,32 @@ public class ScannerPlugin extends Plugin {
         restoredGray.release(); hsv.release(); colourStrength.release(); colourCorrected.release(); restoredBgr.release();
         colourMask.release(); inverseMask.release(); output.release(); encoded.release(); source.release();
         return result;
+    }
+
+    private Mat warpDocument(Mat source, PluginCall call) {
+        Double tlX = call.getDouble("tlX"), tlY = call.getDouble("tlY");
+        Double trX = call.getDouble("trX"), trY = call.getDouble("trY");
+        Double brX = call.getDouble("brX"), brY = call.getDouble("brY");
+        Double blX = call.getDouble("blX"), blY = call.getDouble("blY");
+        if (tlX == null || tlY == null || trX == null || trY == null || brX == null || brY == null || blX == null || blY == null) return source;
+
+        Point tl = new Point(tlX, tlY), tr = new Point(trX, trY), br = new Point(brX, brY), bl = new Point(blX, blY);
+        double width = Math.max(distance(tl, tr), distance(bl, br));
+        double height = Math.max(distance(tl, bl), distance(tr, br));
+        if (width < 80 || height < 80) throw new IllegalArgumentException("四角裁剪区域无效");
+        double scale = Math.min(1.0, 1900.0 / Math.max(width, height));
+        int outputWidth = Math.max(80, (int) Math.round(width * scale));
+        int outputHeight = Math.max(80, (int) Math.round(height * scale));
+        MatOfPoint2f from = new MatOfPoint2f(tl, tr, br, bl);
+        MatOfPoint2f to = new MatOfPoint2f(
+            new Point(0, 0), new Point(outputWidth - 1, 0),
+            new Point(outputWidth - 1, outputHeight - 1), new Point(0, outputHeight - 1)
+        );
+        Mat transform = Imgproc.getPerspectiveTransform(from, to);
+        Mat output = new Mat();
+        Imgproc.warpPerspective(source, output, transform, new Size(outputWidth, outputHeight), Imgproc.INTER_LINEAR, Core.BORDER_CONSTANT, Scalar.all(255));
+        from.release(); to.release(); transform.release(); source.release();
+        return output;
     }
 
     private Mat deghost(Mat channel, double score) {
