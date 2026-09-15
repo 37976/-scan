@@ -134,15 +134,28 @@ export async function fastRestoreScan(dataUrl, corners, maxSide = 1200) {
   const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
   const { width, height } = canvas;
   const block = 48, columns = Math.ceil(width / block), rows = Math.ceil(height / block);
-  const sums = new Float64Array(columns * rows), counts = new Uint32Array(columns * rows);
+  const histogramBins = 16;
+  const histograms = new Uint32Array(columns * rows * histogramBins);
+  const counts = new Uint32Array(columns * rows);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const pixel = (y * width + x) * 4;
     const cell = Math.floor(y / block) * columns + Math.floor(x / block);
-    sums[cell] += pixels.data[pixel] * .299 + pixels.data[pixel + 1] * .587 + pixels.data[pixel + 2] * .114;
+    const luminance = pixels.data[pixel] * .299 + pixels.data[pixel + 1] * .587 + pixels.data[pixel + 2] * .114;
+    histograms[cell * histogramBins + Math.min(histogramBins - 1, Math.floor(luminance / 16))]++;
     counts[cell]++;
   }
-  const fields = new Float32Array(sums.length);
-  for (let i = 0; i < fields.length; i++) fields[i] = sums[i] / Math.max(1, counts[i]);
+  const fields = new Float32Array(counts.length);
+  for (let cell = 0; cell < fields.length; cell++) {
+    const target = counts[cell] * .82;
+    let accumulated = 0;
+    for (let bin = 0; bin < histogramBins; bin++) {
+      accumulated += histograms[cell * histogramBins + bin];
+      if (accumulated >= target) {
+        fields[cell] = bin * 16 + 8;
+        break;
+      }
+    }
+  }
   const fieldAt = (x, y) => {
     const gx = Math.max(0, Math.min(columns - 1, x / block - .5));
     const gy = Math.max(0, Math.min(rows - 1, y / block - .5));
@@ -153,12 +166,29 @@ export async function fastRestoreScan(dataUrl, corners, maxSide = 1200) {
     return top * (1 - ty) + bottom * ty;
   };
   const clamp = value => Math.max(0, Math.min(255, value));
+  const normalizedValues = new Float32Array(width * height);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const pixel = (y * width + x) * 4;
     const r = pixels.data[pixel], g = pixels.data[pixel + 1], b = pixels.data[pixel + 2];
     const luminance = r * .299 + g * .587 + b * .114;
-    const normalized = clamp(luminance / Math.max(45, fieldAt(x, y)) * 246);
-    const gray = clamp(255 - Math.max(0, 255 - normalized) * 1.1);
+    normalizedValues[y * width + x] = clamp(luminance / Math.max(45, fieldAt(x, y)) * 250);
+  }
+  const inkAt = (x, y) => {
+    const safeX = Math.max(0, Math.min(width - 1, x));
+    const safeY = Math.max(0, Math.min(height - 1, y));
+    return Math.max(0, 255 - normalizedValues[safeY * width + safeX]);
+  };
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const pixel = (y * width + x) * 4;
+    const r = pixels.data[pixel], g = pixels.data[pixel + 1], b = pixels.data[pixel + 2];
+    const luminance = r * .299 + g * .587 + b * .114;
+    const ink = inkAt(x, y);
+    const transition = Math.max(0, Math.min(1, (ink - 30) / 58));
+    let retention = .06 + .94 * transition * transition * (3 - 2 * transition);
+    const horizontalSupport = Math.min(inkAt(x - 4, y), inkAt(x + 4, y));
+    const verticalSupport = Math.min(inkAt(x, y - 4), inkAt(x, y + 4));
+    if (Math.max(horizontalSupport, verticalSupport) > 38) retention = Math.max(retention, .88);
+    const gray = clamp(255 - ink * retention * 1.06);
     const redInk = r > g * 1.18 && r > b * 1.15 && r - Math.max(g, b) > 22;
     if (redInk) {
       const colourScale = gray / Math.max(1, luminance);
@@ -170,7 +200,7 @@ export async function fastRestoreScan(dataUrl, corners, maxSide = 1200) {
   context.putImageData(pixels, 0, 0);
   return {
     image: canvas.toDataURL('image/jpeg', .9),
-    metadata: { algorithmVersion: 9, width, height, ghostCorrection: false, continuousRaster: true, preservesOriginalInk: true, engine: 'browser-local-fast' },
+    metadata: { algorithmVersion: 10, width, height, ghostCorrection: true, continuousRaster: true, preservesOriginalInk: true, engine: 'browser-local-deghost' },
   };
 }
 

@@ -1,4 +1,4 @@
-import { fileToDataUrl, suggestCorners, fastRestoreScan, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=25';
+import { fileToDataUrl, suggestCorners, fastRestoreScan, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=26';
 import { createPdf, dataUrlToBytes } from './pdf.js?v=22';
 import { loadDocument, saveDocument, clearDocument } from './storage.js?v=22';
 import { sharePdfNatively } from './native.js?v=3';
@@ -182,7 +182,7 @@ async function start() {
         if ('filter' in page || 'ocr' in page) {
           delete page.filter; delete page.ocr; invalidated = true;
         }
-        if (page.restoration?.algorithmVersion !== 9) {
+        if (page.restoration?.algorithmVersion !== 10) {
           page.processedDataUrl = ''; page.restoration = null; invalidated = true;
         }
       }
