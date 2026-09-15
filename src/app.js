@@ -1,7 +1,7 @@
-import { fileToDataUrl, suggestCorners, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=24';
+import { fileToDataUrl, suggestCorners, fastRestoreScan, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=25';
 import { createPdf, dataUrlToBytes } from './pdf.js?v=22';
 import { loadDocument, saveDocument, clearDocument } from './storage.js?v=22';
-import { nativeScanner, sharePdfNatively } from './native.js?v=2';
+import { sharePdfNatively } from './native.js?v=3';
 
 const state = { id: 'current', name: '我的扫描文档', createdAt: Date.now(), updatedAt: Date.now(), pages: [], editing: null, preview: null, previewOriginal: false, exportOpen: false, busy: '', toast: '' };
 const app = document.querySelector('#app');
@@ -11,7 +11,7 @@ function icon(name) { return ({ camera: '◉', gallery: '▧', pdf: '⇩', rotat
 
 function render() {
   app.innerHTML = `<main class="app-shell">
-    <header class="topbar"><div class="brand"><div class="brand-mark">⌑</div><div><h1>掌上扫描</h1><div class="subtitle">PRIVATE · OFFLINE · BETA.4</div></div></div><button class="icon-button" data-action="new" aria-label="新建文档">＋</button></header>
+    <header class="topbar"><div class="brand"><div class="brand-mark">⌑</div><div><h1>掌上扫描</h1><div class="subtitle">PRIVATE · OFFLINE · BETA.5</div></div></div><button class="icon-button" data-action="new" aria-label="新建文档">＋</button></header>
     <section class="hero"><div class="hero-kicker">POCKET SCANNER</div><h2>${state.pages.length ? '文档已就绪，可以继续添加或导出' : '把纸张，变成整洁的数字文档'}</h2><p>图像仅在本设备处理，不会发送到第三方。</p><div class="stats"><div class="stat"><strong>${state.pages.length}</strong><span>当前页数</span></div><div class="stat"><strong>${state.pages.length ? '已保存' : '待扫描'}</strong><span>本地状态</span></div></div></section>
     <section class="section"><div class="section-title"><h3>${escapeHtml(state.name)}</h3><span>${state.pages.length ? `${state.pages.length} 页` : '新文档'}</span></div>
       ${state.pages.length ? `<div class="pages">${state.pages.map((page, index) => `<article class="page-card"><span class="page-number">${index + 1}</span><span class="rebuild-badge">${page.processedDataUrl ? (page.restoration?.ghostCorrection ? '最新精修 · 已自动去鬼影' : '最新精修 · 保留原迹') : '待生成扫描件'}</span><button class="page-preview" data-action="preview" data-index="${index}" aria-label="查看扫描页 ${index + 1}"><img src="${page.processedDataUrl || page.originalDataUrl}" alt="扫描页 ${index + 1}"><span>点击查看扫描效果</span></button><div class="page-actions"><button data-action="up" data-index="${index}" aria-label="向前移动">${icon('up')}</button><button data-action="rotate" data-index="${index}">${icon('rotate')}</button><button data-action="edit" data-index="${index}">重新精修</button><button class="danger" data-action="delete" data-index="${index}">${icon('delete')}</button><button data-action="down" data-index="${index}" aria-label="向后移动">${icon('down')}</button></div></article>`).join('')}</div>` : `<div class="empty"><div class="empty-symbol"></div><strong>还没有扫描页</strong><div style="font-size:13px;margin-top:7px">使用下方按钮拍摄文档或从相册导入</div></div>`}
@@ -116,13 +116,6 @@ async function autoDetectCorners(dataUrl) {
   }
 }
 
-function withTimeout(promise, milliseconds, message) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), milliseconds)),
-  ]);
-}
-
 async function applyCrop() {
   const editing = state.editing; state.busy = '正在矫正和增强'; render();
   try {
@@ -146,14 +139,7 @@ async function cropForRestoration(originalDataUrl, corners) {
 }
 
 async function restoreScan(originalDataUrl, corners) {
-  const scanner = await nativeScanner();
-  if (scanner) {
-    const points = corners ? {
-      tlX: corners.tl.x, tlY: corners.tl.y, trX: corners.tr.x, trY: corners.tr.y,
-      brX: corners.br.x, brY: corners.br.y, blX: corners.bl.x, blY: corners.bl.y,
-    } : {};
-    return withTimeout(scanner.restore({ image: originalDataUrl, ...points }), 30000, '扫描增强超时，请重新选择图片后再试');
-  }
+  if (globalThis.Capacitor?.isNativePlatform?.()) return fastRestoreScan(originalDataUrl, corners);
   const cropped = await cropForRestoration(originalDataUrl, corners);
   return postImage('/api/scan-restore', cropped).then(response => response.json());
 }
@@ -196,7 +182,7 @@ async function start() {
         if ('filter' in page || 'ocr' in page) {
           delete page.filter; delete page.ocr; invalidated = true;
         }
-        if (page.restoration?.algorithmVersion !== 8) {
+        if (page.restoration?.algorithmVersion !== 9) {
           page.processedDataUrl = ''; page.restoration = null; invalidated = true;
         }
       }

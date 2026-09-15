@@ -115,6 +115,65 @@ export async function suggestCorners(dataUrl) {
   return Object.fromEntries(Object.entries(detected).map(([key, point]) => [key, { x: point.x / scale, y: point.y / scale }]));
 }
 
+export async function fastRestoreScan(dataUrl, corners, maxSide = 1200) {
+  const sourceImage = await loadImage(dataUrl);
+  const scale = Math.min(1, maxSide / Math.max(sourceImage.width, sourceImage.height));
+  const source = document.createElement('canvas');
+  source.width = Math.max(1, Math.round(sourceImage.width * scale));
+  source.height = Math.max(1, Math.round(sourceImage.height * scale));
+  source.getContext('2d').drawImage(sourceImage, 0, 0, source.width, source.height);
+  const scaledCorners = corners
+    ? Object.fromEntries(Object.entries(corners).map(([key, point]) => [key, { x: point.x * scale, y: point.y * scale }]))
+    : defaultCorners(source.width, source.height);
+  const cropped = await perspectiveCrop(source.toDataURL('image/jpeg', .88), scaledCorners);
+  const image = await loadImage(cropped.dataUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = image.width; canvas.height = image.height;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  context.drawImage(image, 0, 0);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+  const { width, height } = canvas;
+  const block = 48, columns = Math.ceil(width / block), rows = Math.ceil(height / block);
+  const sums = new Float64Array(columns * rows), counts = new Uint32Array(columns * rows);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const pixel = (y * width + x) * 4;
+    const cell = Math.floor(y / block) * columns + Math.floor(x / block);
+    sums[cell] += pixels.data[pixel] * .299 + pixels.data[pixel + 1] * .587 + pixels.data[pixel + 2] * .114;
+    counts[cell]++;
+  }
+  const fields = new Float32Array(sums.length);
+  for (let i = 0; i < fields.length; i++) fields[i] = sums[i] / Math.max(1, counts[i]);
+  const fieldAt = (x, y) => {
+    const gx = Math.max(0, Math.min(columns - 1, x / block - .5));
+    const gy = Math.max(0, Math.min(rows - 1, y / block - .5));
+    const x0 = Math.floor(gx), y0 = Math.floor(gy), x1 = Math.min(columns - 1, x0 + 1), y1 = Math.min(rows - 1, y0 + 1);
+    const tx = gx - x0, ty = gy - y0;
+    const top = fields[y0 * columns + x0] * (1 - tx) + fields[y0 * columns + x1] * tx;
+    const bottom = fields[y1 * columns + x0] * (1 - tx) + fields[y1 * columns + x1] * tx;
+    return top * (1 - ty) + bottom * ty;
+  };
+  const clamp = value => Math.max(0, Math.min(255, value));
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const pixel = (y * width + x) * 4;
+    const r = pixels.data[pixel], g = pixels.data[pixel + 1], b = pixels.data[pixel + 2];
+    const luminance = r * .299 + g * .587 + b * .114;
+    const normalized = clamp(luminance / Math.max(45, fieldAt(x, y)) * 246);
+    const gray = clamp(255 - Math.max(0, 255 - normalized) * 1.1);
+    const redInk = r > g * 1.18 && r > b * 1.15 && r - Math.max(g, b) > 22;
+    if (redInk) {
+      const colourScale = gray / Math.max(1, luminance);
+      pixels.data[pixel] = clamp(r * colourScale * 1.08);
+      pixels.data[pixel + 1] = clamp(g * colourScale * .92);
+      pixels.data[pixel + 2] = clamp(b * colourScale * .92);
+    } else pixels.data[pixel] = pixels.data[pixel + 1] = pixels.data[pixel + 2] = gray;
+  }
+  context.putImageData(pixels, 0, 0);
+  return {
+    image: canvas.toDataURL('image/jpeg', .9),
+    metadata: { algorithmVersion: 9, width, height, ghostCorrection: false, continuousRaster: true, preservesOriginalInk: true, engine: 'browser-local-fast' },
+  };
+}
+
 function solve8(matrix, vector) {
   const n = 8; const a = matrix.map((row, i) => [...row, vector[i]]);
   for (let i = 0; i < n; i++) {

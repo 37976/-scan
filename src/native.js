@@ -1,13 +1,3 @@
-let scannerPromise;
-
-export function nativeScanner() {
-  if (!globalThis.Capacitor?.isNativePlatform?.()) return Promise.resolve(null);
-  if (!scannerPromise) {
-    scannerPromise = import('@capacitor/core').then(({ registerPlugin }) => registerPlugin('Scanner'));
-  }
-  return scannerPromise;
-}
-
 export async function sharePdfNatively(blob, fileName, title) {
   if (!globalThis.Capacitor?.isNativePlatform?.()) return false;
   const [{ Filesystem, Directory }, { Share }] = await Promise.all([
