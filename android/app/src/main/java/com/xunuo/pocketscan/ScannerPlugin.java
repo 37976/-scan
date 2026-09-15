@@ -57,8 +57,11 @@ public class ScannerPlugin extends Plugin {
             try {
                 JSObject result = work.run();
                 getActivity().runOnUiThread(() -> call.resolve(result));
-            } catch (Exception error) {
-                getActivity().runOnUiThread(() -> call.reject(error.getMessage(), error));
+            } catch (Throwable error) {
+                Exception cause = error instanceof Exception ? (Exception) error : new Exception(error);
+                String message = error.getMessage() == null ? "原生图像处理失败" : error.getMessage();
+                if (getActivity() != null) getActivity().runOnUiThread(() -> call.reject(message, cause));
+                else call.reject(message, cause);
             }
         }, "PocketScan-OpenCV").start();
     }

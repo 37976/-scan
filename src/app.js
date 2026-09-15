@@ -1,4 +1,4 @@
-import { fileToDataUrl, suggestCorners, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=22';
+import { fileToDataUrl, detectionPreview, suggestCorners, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=23';
 import { createPdf, dataUrlToBytes } from './pdf.js?v=22';
 import { loadDocument, saveDocument, clearDocument } from './storage.js?v=22';
 import { nativeScanner, sharePdfNatively } from './native.js?v=2';
@@ -88,13 +88,27 @@ async function handleAction(action, index) {
 async function autoDetectCorners(dataUrl) {
   try {
     const scanner = await nativeScanner();
-    if (scanner) return await scanner.detectCorners({ image: dataUrl });
+    if (scanner) {
+      const preview = await detectionPreview(dataUrl);
+      const detected = await withTimeout(scanner.detectCorners({ image: preview.dataUrl }), 8000, '自动框选超时');
+      const scaleX = preview.sourceWidth / preview.width;
+      const scaleY = preview.sourceHeight / preview.height;
+      detected.corners = Object.fromEntries(Object.entries(detected.corners).map(([key, point]) => [key, { x: point.x * scaleX, y: point.y * scaleY }]));
+      return detected;
+    }
     const response = await fetch('/api/detect-corners', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: dataUrl }) });
     if (!response.ok) throw new Error('服务不可用');
     return await response.json();
   } catch {
     return { corners: await suggestCorners(dataUrl), confidence: 0, method: 'browser-fallback' };
   }
+}
+
+function withTimeout(promise, milliseconds, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), milliseconds)),
+  ]);
 }
 
 async function applyCrop() {
