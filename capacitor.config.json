@@ -1,0 +1,8 @@
+{
+  "appId": "com.xunuo.pocketscan",
+  "appName": "掌上扫描",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

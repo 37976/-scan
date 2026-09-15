@@ -1,4 +1,8 @@
 node_modules/
+www/
+.android-tools/
+.gradle-local/
+artifacts/
 .venv*/
 __pycache__/
 *.py[cod]

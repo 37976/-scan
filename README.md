@@ -15,6 +15,25 @@ Web 前端没有 npm 运行依赖，因此可以直接执行 `npm run dev`。默
 
 在电脑访问终端显示的地址。手机访问时，相机和离线安装能力需要 HTTPS；部署到任意静态 HTTPS 站点即可。
 
+## Android 64 位 APK
+
+Android 版本使用 Capacitor 8 和 OpenCV 4.14，原生扫描处理只打包 `arm64-v8a`，适用于主流 64 位安卓手机。
+
+准备 Node.js 22、JDK 21 和 Android SDK 36 后执行：
+
+```bash
+npm ci
+npm run android:debug
+```
+
+可直接安装的调试包位于：
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+每次推送到 `main`，GitHub Actions 也会自动构建 `pocketscan-arm64-debug`，可以从仓库 Actions 对应任务的 Artifacts 下载。正式上架应用商店前，还需要创建并妥善保管自己的签名密钥，再执行 `npm run android:release`。
+
 ## 已实现
 
 - 手机后置相机与相册多选
@@ -28,4 +47,4 @@ Web 前端没有 npm 运行依赖，因此可以直接执行 `npm run dev`。默
 
 ## 隐私
 
-浏览器处理与 PDF 生成在本地完成；四角检测和精修通过同一台设备上的本地 Node/Python 服务执行。图片不会上传到互联网，服务端临时文件在每次处理后删除。
+PDF 生成始终在本地完成。Android 版的四角检测、透视校正和精修由手机内置 OpenCV 原生处理，不上传图片；电脑浏览器开发版则通过同一台电脑上的本地 Node/Python 服务处理，临时文件会在每次处理后删除。
