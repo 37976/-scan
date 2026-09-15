@@ -1,4 +1,4 @@
-import { fileToDataUrl, detectionPreview, suggestCorners, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=23';
+import { fileToDataUrl, suggestCorners, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=24';
 import { createPdf, dataUrlToBytes } from './pdf.js?v=22';
 import { loadDocument, saveDocument, clearDocument } from './storage.js?v=22';
 import { nativeScanner, sharePdfNatively } from './native.js?v=2';
@@ -11,7 +11,7 @@ function icon(name) { return ({ camera: '◉', gallery: '▧', pdf: '⇩', rotat
 
 function render() {
   app.innerHTML = `<main class="app-shell">
-    <header class="topbar"><div class="brand"><div class="brand-mark">⌑</div><div><h1>掌上扫描</h1><div class="subtitle">PRIVATE · OFFLINE · YOURS</div></div></div><button class="icon-button" data-action="new" aria-label="新建文档">＋</button></header>
+    <header class="topbar"><div class="brand"><div class="brand-mark">⌑</div><div><h1>掌上扫描</h1><div class="subtitle">PRIVATE · OFFLINE · BETA.3</div></div></div><button class="icon-button" data-action="new" aria-label="新建文档">＋</button></header>
     <section class="hero"><div class="hero-kicker">POCKET SCANNER</div><h2>${state.pages.length ? '文档已就绪，可以继续添加或导出' : '把纸张，变成整洁的数字文档'}</h2><p>图像仅在本设备处理，不会发送到第三方。</p><div class="stats"><div class="stat"><strong>${state.pages.length}</strong><span>当前页数</span></div><div class="stat"><strong>${state.pages.length ? '已保存' : '待扫描'}</strong><span>本地状态</span></div></div></section>
     <section class="section"><div class="section-title"><h3>${escapeHtml(state.name)}</h3><span>${state.pages.length ? `${state.pages.length} 页` : '新文档'}</span></div>
       ${state.pages.length ? `<div class="pages">${state.pages.map((page, index) => `<article class="page-card"><span class="page-number">${index + 1}</span><span class="rebuild-badge">${page.processedDataUrl ? (page.restoration?.ghostCorrection ? '最新精修 · 已自动去鬼影' : '最新精修 · 保留原迹') : '待生成扫描件'}</span><button class="page-preview" data-action="preview" data-index="${index}" aria-label="查看扫描页 ${index + 1}"><img src="${page.processedDataUrl || page.originalDataUrl}" alt="扫描页 ${index + 1}"><span>点击查看扫描效果</span></button><div class="page-actions"><button data-action="up" data-index="${index}" aria-label="向前移动">${icon('up')}</button><button data-action="rotate" data-index="${index}">${icon('rotate')}</button><button data-action="edit" data-index="${index}">重新精修</button><button class="danger" data-action="delete" data-index="${index}">${icon('delete')}</button><button data-action="down" data-index="${index}" aria-label="向后移动">${icon('down')}</button></div></article>`).join('')}</div>` : `<div class="empty"><div class="empty-symbol"></div><strong>还没有扫描页</strong><div style="font-size:13px;margin-top:7px">使用下方按钮拍摄文档或从相册导入</div></div>`}
@@ -25,7 +25,9 @@ function render() {
 
 function editorTemplate() {
   const e = state.editing; const p = e.page; const originalWidth = p.originalWidth || p.width; const originalHeight = p.originalHeight || p.height; const points = ['tl', 'tr', 'br', 'bl'].map(k => `${e.corners[k].x},${e.corners[k].y}`).join(' ');
-  const cornerStatus = e.cornerConfidence
+  const cornerStatus = e.cornerDetectionPending
+    ? '正在后台识别文档边缘，可直接拖动圆点或继续下一步'
+    : e.cornerConfidence
     ? `✓ 已自动框选文档四角 · 置信度 ${Math.round(e.cornerConfidence * 100)}%，可拖动圆点微调`
     : '未识别到清晰纸张边缘，已使用安全边距，可拖动圆点微调';
   return `<div class="modal"><div class="modal-head"><button data-action="close-editor">取消</button><h3>文档校正</h3><div><button data-action="full-page">全页</button><button data-action="reset-corners">自动框选</button></div></div><div class="crop-stage" id="cropStage"><div class="crop-wrap" id="cropWrap" style="aspect-ratio:${originalWidth}/${originalHeight}"><img src="${p.originalDataUrl}"><svg class="crop-svg" viewBox="0 0 ${originalWidth} ${originalHeight}" preserveAspectRatio="none"><polygon class="crop-polygon" points="${points}"/>${Object.entries(e.corners).map(([key, c]) => `<circle class="crop-handle" data-corner="${key}" cx="${c.x}" cy="${c.y}" r="11"/>`).join('')}</svg></div></div><div class="modal-tools"><div class="corner-status">${cornerStatus}</div><div class="auto-note">使用最新精修扫描：四角透视校正、残余倾斜修正、去阴影和褶皱，同时保留连续表格线、原始字迹与印章</div><div class="filter-note">无需选择处理方法，约 3–8 秒自动完成</div><button class="confirm" data-action="apply-crop">校正并生成扫描文档</button></div></div>`;
@@ -42,17 +44,35 @@ function newId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 async function importFiles(files) {
   if (!files.length) return; state.busy = `正在处理 1 / ${files.length}`; render();
   try {
+    const imported = [];
     for (let i = 0; i < files.length; i++) {
       state.busy = `正在处理 ${i + 1} / ${files.length}`; render();
-      const img = await fileToDataUrl(files[i]); state.busy = `正在自动框选 ${i + 1} / ${files.length}`; render();
-      const detected = await autoDetectCorners(img.dataUrl);
-      state.pages.push({ id: newId(), originalDataUrl: img.dataUrl, processedDataUrl: '', originalWidth: img.width, originalHeight: img.height, width: img.width, height: img.height, corners: detected.corners, cornerConfidence: detected.confidence });
+      const img = await fileToDataUrl(files[i]);
+      const page = { id: newId(), originalDataUrl: img.dataUrl, processedDataUrl: '', originalWidth: img.width, originalHeight: img.height, width: img.width, height: img.height, corners: defaultCorners(img.width, img.height), cornerConfidence: 0, cornerDetectionPending: true };
+      state.pages.push(page); imported.push(page);
     }
     persist(); state.busy = ''; render(); openEditor(state.pages.length - files.length);
+    for (const page of imported) void detectPageCorners(page);
   } catch (error) { state.busy = ''; notify(`图片读取失败：${error.message}`); }
 }
 
-function openEditor(index) { const page = state.pages[index]; state.editing = { index, page, corners: structuredClone(page.corners), cornerConfidence: page.cornerConfidence || 0 }; render(); }
+async function detectPageCorners(page) {
+  try {
+    const detected = await autoDetectCorners(page.originalDataUrl);
+    page.corners = detected.corners; page.cornerConfidence = detected.confidence; page.cornerDetectionPending = false;
+    if (state.editing?.page.id === page.id) {
+      state.editing.cornerDetectionPending = false;
+      if (!state.editing.cornersTouched) {
+        state.editing.corners = structuredClone(detected.corners);
+        state.editing.cornerConfidence = detected.confidence;
+      }
+      render();
+    }
+    persist();
+  } catch { page.cornerDetectionPending = false; persist(); }
+}
+
+function openEditor(index) { const page = state.pages[index]; state.editing = { index, page, corners: structuredClone(page.corners), cornerConfidence: page.cornerConfidence || 0, cornerDetectionPending: Boolean(page.cornerDetectionPending), cornersTouched: false }; render(); }
 function movePage(index, change) { const target = index + change; if (target < 0 || target >= state.pages.length) return; [state.pages[index], state.pages[target]] = [state.pages[target], state.pages[index]]; persist(); render(); }
 
 async function handleAction(action, index) {
@@ -78,8 +98,8 @@ async function handleAction(action, index) {
     persist(); state.busy = ''; render();
   }
   if (action === 'close-editor') { state.editing = null; render(); }
-  if (action === 'reset-corners') { state.busy = '正在重新识别文档四角'; render(); const detected = await autoDetectCorners(state.editing.page.originalDataUrl); state.editing.corners = detected.corners; state.editing.cornerConfidence = detected.confidence; state.busy = ''; render(); }
-  if (action === 'full-page') { const page = state.editing.page; state.editing.corners = defaultCorners(page.originalWidth || page.width, page.originalHeight || page.height); state.editing.cornerConfidence = 0; render(); }
+  if (action === 'reset-corners') { state.busy = '正在重新识别文档四角'; render(); const detected = await autoDetectCorners(state.editing.page.originalDataUrl); state.editing.corners = detected.corners; state.editing.cornerConfidence = detected.confidence; state.editing.cornerDetectionPending = false; state.editing.cornersTouched = false; state.busy = ''; render(); }
+  if (action === 'full-page') { const page = state.editing.page; state.editing.corners = defaultCorners(page.originalWidth || page.width, page.originalHeight || page.height); state.editing.cornerConfidence = 0; state.editing.cornerDetectionPending = false; state.editing.cornersTouched = true; render(); }
   if (action === 'apply-crop') await applyCrop();
   if (action === 'download-pdf') await downloadPdf();
   if (action === 'new') { if (state.pages.length && !confirm('新建文档会清除当前本地文档，是否继续？')) return; state.pages = []; state.name = '我的扫描文档'; state.createdAt = Date.now(); await clearDocument(); render(); }
@@ -87,15 +107,7 @@ async function handleAction(action, index) {
 
 async function autoDetectCorners(dataUrl) {
   try {
-    const scanner = await nativeScanner();
-    if (scanner) {
-      const preview = await detectionPreview(dataUrl);
-      const detected = await withTimeout(scanner.detectCorners({ image: preview.dataUrl }), 8000, '自动框选超时');
-      const scaleX = preview.sourceWidth / preview.width;
-      const scaleY = preview.sourceHeight / preview.height;
-      detected.corners = Object.fromEntries(Object.entries(detected.corners).map(([key, point]) => [key, { x: point.x * scaleX, y: point.y * scaleY }]));
-      return detected;
-    }
+    if (globalThis.Capacitor?.isNativePlatform?.()) return { corners: await suggestCorners(dataUrl), confidence: 0, method: 'browser-local' };
     const response = await fetch('/api/detect-corners', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: dataUrl }) });
     if (!response.ok) throw new Error('服务不可用');
     return await response.json();
@@ -136,7 +148,7 @@ async function cropForRestoration(originalDataUrl, corners) {
 async function restoreScan(originalDataUrl, corners) {
   const cropped = await cropForRestoration(originalDataUrl, corners);
   const scanner = await nativeScanner();
-  if (scanner) return scanner.restore({ image: cropped });
+  if (scanner) return withTimeout(scanner.restore({ image: cropped }), 45000, '扫描增强超时，请重新选择图片后再试');
   return postImage('/api/scan-restore', cropped).then(response => response.json());
 }
 
@@ -163,7 +175,7 @@ function bindEditor() {
 document.addEventListener('click', event => { const button = event.target.closest('[data-action]'); if (button) handleAction(button.dataset.action, Number(button.dataset.index)); });
 document.addEventListener('change', event => { if (event.target.matches('#cameraInput, #galleryInput')) { importFiles([...event.target.files]); event.target.value = ''; } });
 document.addEventListener('pointerdown', event => { const handle = event.target.closest('[data-corner]'); if (!handle || !state.editing) return; handle.setPointerCapture(event.pointerId); drag = { key: handle.dataset.corner, svg: handle.ownerSVGElement }; });
-document.addEventListener('pointermove', event => { if (!drag || !state.editing) return; const rect = drag.svg.getBoundingClientRect(); const p = state.editing.page; const width = p.originalWidth || p.width; const height = p.originalHeight || p.height; state.editing.corners[drag.key] = { x: Math.max(0, Math.min(width, (event.clientX - rect.left) / rect.width * width)), y: Math.max(0, Math.min(height, (event.clientY - rect.top) / rect.height * height)) }; const c = state.editing.corners; drag.svg.querySelector(`[data-corner="${drag.key}"]`).setAttribute('cx', c[drag.key].x); drag.svg.querySelector(`[data-corner="${drag.key}"]`).setAttribute('cy', c[drag.key].y); drag.svg.querySelector('polygon').setAttribute('points', ['tl','tr','br','bl'].map(k => `${c[k].x},${c[k].y}`).join(' ')); });
+document.addEventListener('pointermove', event => { if (!drag || !state.editing) return; state.editing.cornersTouched = true; const rect = drag.svg.getBoundingClientRect(); const p = state.editing.page; const width = p.originalWidth || p.width; const height = p.originalHeight || p.height; state.editing.corners[drag.key] = { x: Math.max(0, Math.min(width, (event.clientX - rect.left) / rect.width * width)), y: Math.max(0, Math.min(height, (event.clientY - rect.top) / rect.height * height)) }; const c = state.editing.corners; drag.svg.querySelector(`[data-corner="${drag.key}"]`).setAttribute('cx', c[drag.key].x); drag.svg.querySelector(`[data-corner="${drag.key}"]`).setAttribute('cy', c[drag.key].y); drag.svg.querySelector('polygon').setAttribute('points', ['tl','tr','br','bl'].map(k => `${c[k].x},${c[k].y}`).join(' ')); });
 document.addEventListener('pointerup', () => { drag = null; });
 
 async function start() {
@@ -174,6 +186,7 @@ async function start() {
       Object.assign(state, saved);
       let invalidated = false;
       for (const page of state.pages) {
+        if (page.cornerDetectionPending) { page.cornerDetectionPending = false; invalidated = true; }
         if ('filter' in page || 'ocr' in page) {
           delete page.filter; delete page.ocr; invalidated = true;
         }
@@ -185,6 +198,11 @@ async function start() {
     }
   } catch { /* IndexedDB may be blocked in private mode. */ }
   render();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    if (globalThis.Capacitor?.isNativePlatform?.()) {
+      navigator.serviceWorker.getRegistrations().then(registrations => Promise.all(registrations.map(registration => registration.unregister()))).catch(() => {});
+      if ('caches' in globalThis) caches.keys().then(keys => Promise.all(keys.map(key => caches.delete(key)))).catch(() => {});
+    } else navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
 }
 start();

@@ -101,23 +101,6 @@ export async function fileToDataUrl(file, maxSide = 2800) {
   return { dataUrl: canvas.toDataURL('image/jpeg', 0.95), width: canvas.width, height: canvas.height };
 }
 
-export async function detectionPreview(dataUrl, maxSide = 1100) {
-  const image = await loadImage(dataUrl);
-  const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
-  if (scale === 1) return { dataUrl, width: image.width, height: image.height, sourceWidth: image.width, sourceHeight: image.height };
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(image.width * scale));
-  canvas.height = Math.max(1, Math.round(image.height * scale));
-  canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
-  return {
-    dataUrl: canvas.toDataURL('image/jpeg', 0.82),
-    width: canvas.width,
-    height: canvas.height,
-    sourceWidth: image.width,
-    sourceHeight: image.height,
-  };
-}
-
 export async function suggestCorners(dataUrl) {
   const image = await loadImage(dataUrl);
   const size = 240;
