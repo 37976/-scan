@@ -52,6 +52,9 @@ h1 { font: 700 22px/1.1 Georgia, 'Noto Serif CJK SC', serif; margin: 0; letter-s
 .confirm { width: 100%; border: 0; border-radius: 14px; background: #df6b49; color: white; padding: 14px; font-weight: 700; margin-top: 12px; }
 .export-sheet { position: fixed; z-index: 30; inset: 0; background: #102e2a99; display: flex; align-items: end; justify-content: center; }
 .sheet { background: #f8f5ed; border-radius: 26px 26px 0 0; padding: 25px 20px calc(22px + env(safe-area-inset-bottom)); width: min(760px, 100%); }.sheet h3 { font: 700 22px Georgia, 'Noto Serif CJK SC', serif; margin: 0 0 20px; }
+.import-sheet h3 { margin-bottom: 5px; }.import-intro { margin: 0 0 16px; color: #6d7772; font-size: 12px; }
+.import-choice { width: 100%; display: flex; flex-direction: column; align-items: start; gap: 4px; margin-top: 9px; padding: 15px 16px; border: 1px solid #d8d2c7; border-radius: 15px; background: white; color: #173f3a; text-align: left; }.import-choice strong { font-size: 15px; }.import-choice span { color: #6d7772; font-size: 11px; line-height: 1.5; }.import-choice.processed { border-color: #e4a693; background: #fff6f1; }.import-choice.processed strong { color: #b65034; }
+.import-cancel { width: 100%; margin-top: 14px; padding: 13px; border: 0; border-radius: 13px; background: #e7e3da; color: #36534e; font-weight: 600; }
 .export-select-sheet { max-height: calc(94vh - env(safe-area-inset-top)); overflow-y: auto; }
 .export-title { display: flex; align-items: start; justify-content: space-between; gap: 12px; }.export-title h3 { margin-bottom: 4px; }.export-title p { margin: 0; color: #6d7772; font-size: 12px; }
 .selection-tools { display: flex; gap: 5px; flex-shrink: 0; }.selection-tools button { border: 0; border-radius: 9px; padding: 8px 10px; background: #e7e3da; color: #36534e; font-size: 12px; }

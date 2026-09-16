@@ -1,9 +1,9 @@
-import { fileToDataUrl, suggestCorners, fastRestoreScan, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=27';
+import { fileToDataUrl, suggestCorners, fastRestoreScan, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=28';
 import { createPdf, dataUrlToBytes } from './pdf.js?v=22';
 import { loadDocument, saveDocument, clearDocument } from './storage.js?v=22';
 import { sharePdfNatively } from './native.js?v=3';
 
-const state = { id: 'current', name: '我的扫描文档', createdAt: Date.now(), updatedAt: Date.now(), pages: [], editing: null, preview: null, previewOriginal: false, exportOpen: false, exportSelection: [], exportOptions: null, busy: '', toast: '' };
+const state = { id: 'current', name: '我的扫描文档', createdAt: Date.now(), updatedAt: Date.now(), pages: [], editing: null, preview: null, previewOriginal: false, importOpen: false, exportOpen: false, exportSelection: [], exportOptions: null, busy: '', toast: '' };
 const app = document.querySelector('#app');
 let saveTimer; let drag = null;
 
@@ -11,16 +11,20 @@ function icon(name) { return ({ camera: '◉', gallery: '▧', pdf: '⇩', rotat
 
 function render() {
   app.innerHTML = `<main class="app-shell">
-    <header class="topbar"><div class="brand"><div class="brand-mark">⌑</div><div><h1>掌上扫描</h1><div class="subtitle">PRIVATE · OFFLINE · V1.0.0</div></div></div><button class="icon-button" data-action="new" aria-label="新建文档">＋</button></header>
+    <header class="topbar"><div class="brand"><div class="brand-mark">⌑</div><div><h1>掌上扫描</h1><div class="subtitle">PRIVATE · OFFLINE · V1.0.1</div></div></div><button class="icon-button" data-action="new" aria-label="新建文档">＋</button></header>
     <section class="hero"><div class="hero-kicker">POCKET SCANNER</div><h2>${state.pages.length ? '文档已就绪，可以继续添加或导出' : '把纸张，变成整洁的数字文档'}</h2><p>图像仅在本设备处理，不会发送到第三方。</p><div class="stats"><div class="stat"><strong>${state.pages.length}</strong><span>当前页数</span></div><div class="stat"><strong>${state.pages.length ? '已保存' : '待扫描'}</strong><span>本地状态</span></div></div></section>
     <section class="section"><div class="section-title"><h3>${escapeHtml(state.name)}</h3><span>${state.pages.length ? `${state.pages.length} 页` : '新文档'}</span></div>
-      ${state.pages.length ? `<div class="pages">${state.pages.map((page, index) => `<article class="page-card"><span class="page-number">${index + 1}</span><span class="rebuild-badge">${page.processedDataUrl ? (page.restoration?.ghostCorrection ? '最新精修 · 已自动去鬼影' : '最新精修 · 保留原迹') : '待生成扫描件'}</span><button class="page-preview" data-action="preview" data-index="${index}" aria-label="查看扫描页 ${index + 1}"><img src="${page.processedDataUrl || page.originalDataUrl}" alt="扫描页 ${index + 1}"><span>点击查看扫描效果</span></button><div class="page-actions"><button data-action="up" data-index="${index}" aria-label="向前移动">${icon('up')}</button><button data-action="rotate" data-index="${index}">${icon('rotate')}</button><button data-action="edit" data-index="${index}">重新精修</button><button class="danger" data-action="delete" data-index="${index}">${icon('delete')}</button><button data-action="down" data-index="${index}" aria-label="向后移动">${icon('down')}</button></div></article>`).join('')}</div>` : `<div class="empty"><div class="empty-symbol"></div><strong>还没有扫描页</strong><div style="font-size:13px;margin-top:7px">使用下方按钮拍摄文档或从相册导入</div></div>`}
+      ${state.pages.length ? `<div class="pages">${state.pages.map((page, index) => `<article class="page-card"><span class="page-number">${index + 1}</span><span class="rebuild-badge">${page.restoration?.externalProcessed ? '已导入成品 · 不二次处理' : page.processedDataUrl ? (page.restoration?.ghostCorrection ? '最新精修 · 已自动去鬼影' : '最新精修 · 保留原迹') : '待生成扫描件'}</span><button class="page-preview" data-action="preview" data-index="${index}" aria-label="查看扫描页 ${index + 1}"><img src="${page.processedDataUrl || page.originalDataUrl}" alt="扫描页 ${index + 1}"><span>点击查看扫描效果</span></button><div class="page-actions"><button data-action="up" data-index="${index}" aria-label="向前移动">${icon('up')}</button><button data-action="rotate" data-index="${index}">${icon('rotate')}</button><button data-action="edit" data-index="${index}">重新精修</button><button class="danger" data-action="delete" data-index="${index}">${icon('delete')}</button><button data-action="down" data-index="${index}" aria-label="向后移动">${icon('down')}</button></div></article>`).join('')}</div>` : `<div class="empty"><div class="empty-symbol"></div><strong>还没有扫描页</strong><div style="font-size:13px;margin-top:7px">使用下方按钮拍摄文档或从相册导入</div></div>`}
     </section>
     <nav class="bottom-actions"><button class="action" data-action="camera">${icon('camera')} 拍摄<span>调用手机相机</span></button><button class="action" data-action="gallery">${icon('gallery')} 导入<span>支持多选图片</span></button><button class="action primary" data-action="pdf" ${state.pages.length ? '' : 'disabled'}>${icon('pdf')} 导出 PDF<span>本地即时生成</span></button></nav>
-    <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden><input id="galleryInput" type="file" accept="image/*" multiple hidden>
-    ${state.editing ? editorTemplate() : ''}${state.preview !== null ? previewTemplate() : ''}${state.exportOpen ? exportTemplate() : ''}${state.toast ? `<div class="toast">${escapeHtml(state.toast)}</div>` : ''}${state.busy ? `<div class="busy"><div><div class="spinner"></div>${escapeHtml(state.busy)}</div></div>` : ''}
+    <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden><input id="galleryInput" type="file" accept="image/*" multiple hidden><input id="processedInput" type="file" accept="image/*" multiple hidden>
+    ${state.editing ? editorTemplate() : ''}${state.preview !== null ? previewTemplate() : ''}${state.importOpen ? importTemplate() : ''}${state.exportOpen ? exportTemplate() : ''}${state.toast ? `<div class="toast">${escapeHtml(state.toast)}</div>` : ''}${state.busy ? `<div class="busy"><div><div class="spinner"></div>${escapeHtml(state.busy)}</div></div>` : ''}
   </main>`;
   bindEditor();
+}
+
+function importTemplate() {
+  return `<div class="export-sheet"><div class="sheet import-sheet"><h3>选择导入方式</h3><p class="import-intro">根据图片当前状态选择，两种方式都支持多选。</p><button class="import-choice" data-action="import-original"><strong>导入原始照片</strong><span>自动框选四角，进入校正和扫描增强</span></button><button class="import-choice processed" data-action="import-processed"><strong>导入已处理图片</strong><span>直接作为扫描页，不裁剪、不增强、不改变内容</span></button><button class="import-cancel" data-action="close-import">取消</button></div></div>`;
 }
 
 function editorTemplate() {
@@ -42,7 +46,11 @@ function exportTemplate() {
     return `<button class="export-page${selectedOrder ? ' selected' : ''}" data-action="toggle-export-page" data-index="${index}" aria-label="${selectedOrder ? `取消选择第 ${index + 1} 页` : `选择第 ${index + 1} 页`}"><img src="${page.processedDataUrl || page.originalDataUrl}" alt="第 ${index + 1} 页"><span class="source-page">原第 ${index + 1} 页</span>${selectedOrder ? `<span class="selection-order">${selectedOrder}</span>` : ''}</button>`;
   }).join('')}</div><div class="selection-summary">${selectedCount ? `已选 ${selectedCount} 页，数字为 PDF 顺序` : '请依次点击要导出的图片'}</div><div class="field"><label>文件名</label><input id="pdfName" value="${escapeHtml(options.name)}"></div><div class="export-options"><div class="field"><label>页面尺寸</label><select id="pageSize"><option value="a4" ${options.pageSize === 'a4' ? 'selected' : ''}>A4（自动横竖）</option><option value="original" ${options.pageSize === 'original' ? 'selected' : ''}>跟随图片尺寸</option></select></div><div class="field"><label>页边距</label><select id="margin"><option value="24" ${options.margin === '24' ? 'selected' : ''}>标准</option><option value="0" ${options.margin === '0' ? 'selected' : ''}>无边距</option><option value="48" ${options.margin === '48' ? 'selected' : ''}>宽边距</option></select></div></div><div class="sheet-actions"><button class="cancel" data-action="close-export">取消</button><button class="export" data-action="download-pdf" ${selectedCount ? '' : 'disabled'}>生成并保存 · ${selectedCount} 页</button></div></div></div>`;
 }
-function previewTemplate() { const page = state.pages[state.preview]; const original = state.previewOriginal || !page.processedDataUrl; return `<div class="preview-modal"><header><button data-action="close-preview">关闭</button><strong>${original ? '拍摄原图' : '精修扫描件'} · 第 ${state.preview + 1} 页</strong><button data-action="toggle-preview">${original ? '看处理结果' : '核对原图'}</button></header><div class="preview-canvas"><img src="${original ? page.originalDataUrl : page.processedDataUrl}" alt="扫描效果预览"></div></div>`; }
+function previewTemplate() {
+  const page = state.pages[state.preview]; const external = page.restoration?.externalProcessed;
+  const original = !external && (state.previewOriginal || !page.processedDataUrl);
+  return `<div class="preview-modal"><header><button data-action="close-preview">关闭</button><strong>${external ? '已处理扫描件' : original ? '拍摄原图' : '精修扫描件'} · 第 ${state.preview + 1} 页</strong>${external ? '<span></span>' : `<button data-action="toggle-preview">${original ? '看处理结果' : '核对原图'}</button>`}</header><div class="preview-canvas"><img src="${original ? page.originalDataUrl : page.processedDataUrl}" alt="扫描效果预览"></div></div>`;
+}
 
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[char]); }
 function notify(message) { state.toast = message; render(); setTimeout(() => { state.toast = ''; render(); }, 2200); }
@@ -68,6 +76,24 @@ async function importFiles(files) {
   } catch (error) { state.busy = ''; notify(`图片读取失败：${error.message}`); }
 }
 
+async function importProcessedFiles(files) {
+  if (!files.length) return; state.busy = `正在导入成品 1 / ${files.length}`; render();
+  try {
+    for (let i = 0; i < files.length; i++) {
+      state.busy = `正在导入成品 ${i + 1} / ${files.length}`; render();
+      const img = await fileToDataUrl(files[i], 6000);
+      const corners = { tl: { x: 0, y: 0 }, tr: { x: img.width, y: 0 }, br: { x: img.width, y: img.height }, bl: { x: 0, y: img.height } };
+      state.pages.push({
+        id: newId(), originalDataUrl: img.dataUrl, processedDataUrl: img.dataUrl,
+        originalWidth: img.width, originalHeight: img.height, width: img.width, height: img.height,
+        corners, cornerConfidence: 1, cornerDetectionPending: false,
+        restoration: { algorithmVersion: 10, width: img.width, height: img.height, ghostCorrection: false, continuousRaster: true, preservesOriginalInk: true, externalProcessed: true, engine: 'external-import' },
+      });
+    }
+    persist(); state.busy = ''; render(); notify(`已导入 ${files.length} 张处理好的图片`);
+  } catch (error) { state.busy = ''; notify(`成品图片导入失败：${error.message}`); }
+}
+
 async function detectPageCorners(page) {
   try {
     const detected = await autoDetectCorners(page.originalDataUrl);
@@ -89,7 +115,10 @@ function movePage(index, change) { const target = index + change; if (target < 0
 
 async function handleAction(action, index) {
   if (action === 'camera') document.querySelector('#cameraInput').click();
-  if (action === 'gallery') document.querySelector('#galleryInput').click();
+  if (action === 'gallery') { state.importOpen = true; render(); }
+  if (action === 'close-import') { state.importOpen = false; render(); }
+  if (action === 'import-original') { state.importOpen = false; render(); document.querySelector('#galleryInput').click(); }
+  if (action === 'import-processed') { state.importOpen = false; render(); document.querySelector('#processedInput').click(); }
   if (action === 'pdf') { state.exportSelection = []; state.exportOptions = { name: state.name, pageSize: 'a4', margin: '24' }; state.exportOpen = true; render(); }
   if (action === 'close-export') { state.exportOpen = false; state.exportSelection = []; state.exportOptions = null; render(); }
   if (action === 'toggle-export-page') {
@@ -190,7 +219,11 @@ function bindEditor() {
 }
 
 document.addEventListener('click', event => { const button = event.target.closest('[data-action]'); if (button) handleAction(button.dataset.action, Number(button.dataset.index)); });
-document.addEventListener('change', event => { if (event.target.matches('#cameraInput, #galleryInput')) { importFiles([...event.target.files]); event.target.value = ''; } });
+document.addEventListener('change', event => {
+  if (event.target.matches('#cameraInput, #galleryInput')) importFiles([...event.target.files]);
+  if (event.target.matches('#processedInput')) importProcessedFiles([...event.target.files]);
+  if (event.target.matches('#cameraInput, #galleryInput, #processedInput')) event.target.value = '';
+});
 document.addEventListener('pointerdown', event => { const handle = event.target.closest('[data-corner]'); if (!handle || !state.editing) return; handle.setPointerCapture(event.pointerId); drag = { key: handle.dataset.corner, svg: handle.ownerSVGElement }; });
 document.addEventListener('pointermove', event => { if (!drag || !state.editing) return; state.editing.cornersTouched = true; const rect = drag.svg.getBoundingClientRect(); const p = state.editing.page; const width = p.originalWidth || p.width; const height = p.originalHeight || p.height; state.editing.corners[drag.key] = { x: Math.max(0, Math.min(width, (event.clientX - rect.left) / rect.width * width)), y: Math.max(0, Math.min(height, (event.clientY - rect.top) / rect.height * height)) }; const c = state.editing.corners; drag.svg.querySelector(`[data-corner="${drag.key}"]`).setAttribute('cx', c[drag.key].x); drag.svg.querySelector(`[data-corner="${drag.key}"]`).setAttribute('cy', c[drag.key].y); drag.svg.querySelector('polygon').setAttribute('points', ['tl','tr','br','bl'].map(k => `${c[k].x},${c[k].y}`).join(' ')); });
 document.addEventListener('pointerup', () => { drag = null; });
