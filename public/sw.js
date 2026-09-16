@@ -1,4 +1,4 @@
-const CACHE = 'pocketscan-v22';
+const CACHE = 'pocketscan-v23';
 const ASSETS = ['/', '/index.html', '/src/app.js', '/src/style.css', '/src/image.js', '/src/pdf.js', '/src/storage.js', '/icon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS))));

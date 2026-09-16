@@ -1,9 +1,9 @@
-import { fileToDataUrl, suggestCorners, fastRestoreScan, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=26';
+import { fileToDataUrl, suggestCorners, fastRestoreScan, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=27';
 import { createPdf, dataUrlToBytes } from './pdf.js?v=22';
 import { loadDocument, saveDocument, clearDocument } from './storage.js?v=22';
 import { sharePdfNatively } from './native.js?v=3';
 
-const state = { id: 'current', name: '我的扫描文档', createdAt: Date.now(), updatedAt: Date.now(), pages: [], editing: null, preview: null, previewOriginal: false, exportOpen: false, busy: '', toast: '' };
+const state = { id: 'current', name: '我的扫描文档', createdAt: Date.now(), updatedAt: Date.now(), pages: [], editing: null, preview: null, previewOriginal: false, exportOpen: false, exportSelection: [], exportOptions: null, busy: '', toast: '' };
 const app = document.querySelector('#app');
 let saveTimer; let drag = null;
 
@@ -11,7 +11,7 @@ function icon(name) { return ({ camera: '◉', gallery: '▧', pdf: '⇩', rotat
 
 function render() {
   app.innerHTML = `<main class="app-shell">
-    <header class="topbar"><div class="brand"><div class="brand-mark">⌑</div><div><h1>掌上扫描</h1><div class="subtitle">PRIVATE · OFFLINE · BETA.5</div></div></div><button class="icon-button" data-action="new" aria-label="新建文档">＋</button></header>
+    <header class="topbar"><div class="brand"><div class="brand-mark">⌑</div><div><h1>掌上扫描</h1><div class="subtitle">PRIVATE · OFFLINE · V1.0.0</div></div></div><button class="icon-button" data-action="new" aria-label="新建文档">＋</button></header>
     <section class="hero"><div class="hero-kicker">POCKET SCANNER</div><h2>${state.pages.length ? '文档已就绪，可以继续添加或导出' : '把纸张，变成整洁的数字文档'}</h2><p>图像仅在本设备处理，不会发送到第三方。</p><div class="stats"><div class="stat"><strong>${state.pages.length}</strong><span>当前页数</span></div><div class="stat"><strong>${state.pages.length ? '已保存' : '待扫描'}</strong><span>本地状态</span></div></div></section>
     <section class="section"><div class="section-title"><h3>${escapeHtml(state.name)}</h3><span>${state.pages.length ? `${state.pages.length} 页` : '新文档'}</span></div>
       ${state.pages.length ? `<div class="pages">${state.pages.map((page, index) => `<article class="page-card"><span class="page-number">${index + 1}</span><span class="rebuild-badge">${page.processedDataUrl ? (page.restoration?.ghostCorrection ? '最新精修 · 已自动去鬼影' : '最新精修 · 保留原迹') : '待生成扫描件'}</span><button class="page-preview" data-action="preview" data-index="${index}" aria-label="查看扫描页 ${index + 1}"><img src="${page.processedDataUrl || page.originalDataUrl}" alt="扫描页 ${index + 1}"><span>点击查看扫描效果</span></button><div class="page-actions"><button data-action="up" data-index="${index}" aria-label="向前移动">${icon('up')}</button><button data-action="rotate" data-index="${index}">${icon('rotate')}</button><button data-action="edit" data-index="${index}">重新精修</button><button class="danger" data-action="delete" data-index="${index}">${icon('delete')}</button><button data-action="down" data-index="${index}" aria-label="向后移动">${icon('down')}</button></div></article>`).join('')}</div>` : `<div class="empty"><div class="empty-symbol"></div><strong>还没有扫描页</strong><div style="font-size:13px;margin-top:7px">使用下方按钮拍摄文档或从相册导入</div></div>`}
@@ -33,13 +33,25 @@ function editorTemplate() {
   return `<div class="modal"><div class="modal-head"><button data-action="close-editor">取消</button><h3>文档校正</h3><div><button data-action="full-page">全页</button><button data-action="reset-corners">自动框选</button></div></div><div class="crop-stage" id="cropStage"><div class="crop-wrap" id="cropWrap" style="aspect-ratio:${originalWidth}/${originalHeight}"><img src="${p.originalDataUrl}"><svg class="crop-svg" viewBox="0 0 ${originalWidth} ${originalHeight}" preserveAspectRatio="none"><polygon class="crop-polygon" points="${points}"/>${Object.entries(e.corners).map(([key, c]) => `<circle class="crop-handle" data-corner="${key}" cx="${c.x}" cy="${c.y}" r="11"/>`).join('')}</svg></div></div><div class="modal-tools"><div class="corner-status">${cornerStatus}</div><div class="auto-note">使用最新精修扫描：四角透视校正、残余倾斜修正、去阴影和褶皱，同时保留连续表格线、原始字迹与印章</div><div class="filter-note">无需选择处理方法，约 3–8 秒自动完成</div><button class="confirm" data-action="apply-crop">校正并生成扫描文档</button></div></div>`;
 }
 
-function exportTemplate() { return `<div class="export-sheet"><div class="sheet"><h3>导出 PDF</h3><div class="field"><label>文件名</label><input id="pdfName" value="${escapeHtml(state.name)}"></div><div class="field"><label>页面尺寸</label><select id="pageSize"><option value="a4">A4（自动横竖）</option><option value="original">跟随图片尺寸</option></select></div><div class="field"><label>页边距</label><select id="margin"><option value="24">标准</option><option value="0">无边距</option><option value="48">宽边距</option></select></div><div class="sheet-actions"><button class="cancel" data-action="close-export">取消</button><button class="export" data-action="download-pdf">生成并保存 · ${state.pages.length} 页</button></div></div></div>`; }
+function exportTemplate() {
+  const order = new Map(state.exportSelection.map((id, index) => [id, index + 1]));
+  const selectedCount = state.exportSelection.length;
+  const options = state.exportOptions || { name: state.name, pageSize: 'a4', margin: '24' };
+  return `<div class="export-sheet"><div class="sheet export-select-sheet"><div class="export-title"><div><h3>选择导出页面</h3><p>按点击先后顺序生成 PDF</p></div><div class="selection-tools"><button data-action="select-all-export">全选</button><button data-action="clear-export">清空</button></div></div><div class="export-pages">${state.pages.map((page, index) => {
+    const selectedOrder = order.get(page.id);
+    return `<button class="export-page${selectedOrder ? ' selected' : ''}" data-action="toggle-export-page" data-index="${index}" aria-label="${selectedOrder ? `取消选择第 ${index + 1} 页` : `选择第 ${index + 1} 页`}"><img src="${page.processedDataUrl || page.originalDataUrl}" alt="第 ${index + 1} 页"><span class="source-page">原第 ${index + 1} 页</span>${selectedOrder ? `<span class="selection-order">${selectedOrder}</span>` : ''}</button>`;
+  }).join('')}</div><div class="selection-summary">${selectedCount ? `已选 ${selectedCount} 页，数字为 PDF 顺序` : '请依次点击要导出的图片'}</div><div class="field"><label>文件名</label><input id="pdfName" value="${escapeHtml(options.name)}"></div><div class="export-options"><div class="field"><label>页面尺寸</label><select id="pageSize"><option value="a4" ${options.pageSize === 'a4' ? 'selected' : ''}>A4（自动横竖）</option><option value="original" ${options.pageSize === 'original' ? 'selected' : ''}>跟随图片尺寸</option></select></div><div class="field"><label>页边距</label><select id="margin"><option value="24" ${options.margin === '24' ? 'selected' : ''}>标准</option><option value="0" ${options.margin === '0' ? 'selected' : ''}>无边距</option><option value="48" ${options.margin === '48' ? 'selected' : ''}>宽边距</option></select></div></div><div class="sheet-actions"><button class="cancel" data-action="close-export">取消</button><button class="export" data-action="download-pdf" ${selectedCount ? '' : 'disabled'}>生成并保存 · ${selectedCount} 页</button></div></div></div>`;
+}
 function previewTemplate() { const page = state.pages[state.preview]; const original = state.previewOriginal || !page.processedDataUrl; return `<div class="preview-modal"><header><button data-action="close-preview">关闭</button><strong>${original ? '拍摄原图' : '精修扫描件'} · 第 ${state.preview + 1} 页</strong><button data-action="toggle-preview">${original ? '看处理结果' : '核对原图'}</button></header><div class="preview-canvas"><img src="${original ? page.originalDataUrl : page.processedDataUrl}" alt="扫描效果预览"></div></div>`; }
 
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[char]); }
 function notify(message) { state.toast = message; render(); setTimeout(() => { state.toast = ''; render(); }, 2200); }
 function persist() { clearTimeout(saveTimer); state.updatedAt = Date.now(); saveTimer = setTimeout(() => saveDocument({ id: state.id, name: state.name, createdAt: state.createdAt, updatedAt: state.updatedAt, pages: state.pages }).catch(() => notify('本地保存失败')), 250); }
 function newId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+function rememberExportOptions() {
+  const name = document.querySelector('#pdfName');
+  if (name) state.exportOptions = { name: name.value, pageSize: document.querySelector('#pageSize').value, margin: document.querySelector('#margin').value };
+}
 
 async function importFiles(files) {
   if (!files.length) return; state.busy = `正在处理 1 / ${files.length}`; render();
@@ -78,8 +90,19 @@ function movePage(index, change) { const target = index + change; if (target < 0
 async function handleAction(action, index) {
   if (action === 'camera') document.querySelector('#cameraInput').click();
   if (action === 'gallery') document.querySelector('#galleryInput').click();
-  if (action === 'pdf') { state.exportOpen = true; render(); }
-  if (action === 'close-export') { state.exportOpen = false; render(); }
+  if (action === 'pdf') { state.exportSelection = []; state.exportOptions = { name: state.name, pageSize: 'a4', margin: '24' }; state.exportOpen = true; render(); }
+  if (action === 'close-export') { state.exportOpen = false; state.exportSelection = []; state.exportOptions = null; render(); }
+  if (action === 'toggle-export-page') {
+    rememberExportOptions();
+    const id = state.pages[index]?.id;
+    if (!id) return;
+    const selectedIndex = state.exportSelection.indexOf(id);
+    if (selectedIndex === -1) state.exportSelection.push(id);
+    else state.exportSelection.splice(selectedIndex, 1);
+    render();
+  }
+  if (action === 'select-all-export') { rememberExportOptions(); state.exportSelection = state.pages.map(page => page.id); render(); }
+  if (action === 'clear-export') { rememberExportOptions(); state.exportSelection = []; render(); }
   if (action === 'edit') openEditor(index);
   if (action === 'preview') { state.preview = index; state.previewOriginal = false; render(); }
   if (action === 'close-preview') { state.preview = null; render(); }
@@ -146,15 +169,17 @@ async function restoreScan(originalDataUrl, corners) {
 
 async function downloadPdf() {
   const name = document.querySelector('#pdfName').value.trim() || '扫描文档'; const pageSize = document.querySelector('#pageSize').value; const margin = Number(document.querySelector('#margin').value);
+  const selectedPages = state.exportSelection.map(id => state.pages.find(page => page.id === id)).filter(Boolean);
+  if (!selectedPages.length) { notify('请先选择要导出的图片'); return; }
   state.busy = '正在生成 PDF'; state.exportOpen = false; render();
   try {
     const pages = [];
-    for (const page of state.pages) { let dataUrl = page.processedDataUrl; let width = page.width, height = page.height; if (!dataUrl) { const restored = await restoreScan(page.originalDataUrl, page.corners); dataUrl = restored.image; width = restored.metadata.width; height = restored.metadata.height; page.restoration = restored.metadata; } pages.push({ bytes: dataUrlToBytes(dataUrl), width, height }); }
+    for (const page of selectedPages) { let dataUrl = page.processedDataUrl; let width = page.width, height = page.height; if (!dataUrl) { const restored = await restoreScan(page.originalDataUrl, page.corners); dataUrl = restored.image; width = restored.metadata.width; height = restored.metadata.height; Object.assign(page, { processedDataUrl: dataUrl, width, height, restoration: restored.metadata }); } pages.push({ bytes: dataUrlToBytes(dataUrl), width, height }); }
     const blob = createPdf(pages, { pageSize, margin }); state.name = name; persist(); const fileName = `${name.replace(/[\\/:*?"<>|]/g, '_')}.pdf`;
     if (await sharePdfNatively(blob, fileName, name)) { /* Native share sheet opened. */ }
     else if (navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: 'application/pdf' })] })) await navigator.share({ files: [new File([blob], fileName, { type: 'application/pdf' })], title: name });
     else { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = fileName; link.click(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
-    state.busy = ''; render(); notify('PDF 已生成');
+    state.exportSelection = []; state.exportOptions = null; state.busy = ''; render(); notify(`PDF 已生成 · ${selectedPages.length} 页`);
   } catch (error) { state.busy = ''; notify(`导出失败：${error.message}`); }
 }
 
