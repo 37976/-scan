@@ -1,7 +1,7 @@
 import { fileToDataUrl, suggestCorners, fastRestoreScan, perspectiveCrop, rotateImage, defaultCorners } from './image.js?v=28';
 import { createPdf, dataUrlToBytes } from './pdf.js?v=22';
 import { loadDocument, saveDocument, clearDocument } from './storage.js?v=22';
-import { sharePdfNatively } from './native.js?v=3';
+import { savePdfNatively, sharePdfNatively } from './native.js?v=4';
 
 const state = { id: 'current', name: '我的扫描文档', createdAt: Date.now(), updatedAt: Date.now(), pages: [], editing: null, preview: null, previewOriginal: false, importOpen: false, exportOpen: false, exportSelection: [], exportOptions: null, busy: '', toast: '' };
 const app = document.querySelector('#app');
@@ -40,11 +40,11 @@ function editorTemplate() {
 function exportTemplate() {
   const order = new Map(state.exportSelection.map((id, index) => [id, index + 1]));
   const selectedCount = state.exportSelection.length;
-  const options = state.exportOptions || { name: state.name, pageSize: 'a4', margin: '24' };
+  const options = state.exportOptions || { name: state.name, pageSize: 'a4', margin: '24', destination: 'save' };
   return `<div class="export-sheet"><div class="sheet export-select-sheet"><div class="export-title"><div><h3>选择导出页面</h3><p>按点击先后顺序生成 PDF</p></div><div class="selection-tools"><button data-action="select-all-export">全选</button><button data-action="clear-export">清空</button></div></div><div class="export-pages">${state.pages.map((page, index) => {
     const selectedOrder = order.get(page.id);
     return `<button class="export-page${selectedOrder ? ' selected' : ''}" data-action="toggle-export-page" data-index="${index}" aria-label="${selectedOrder ? `取消选择第 ${index + 1} 页` : `选择第 ${index + 1} 页`}"><img src="${page.processedDataUrl || page.originalDataUrl}" alt="第 ${index + 1} 页"><span class="source-page">原第 ${index + 1} 页</span>${selectedOrder ? `<span class="selection-order">${selectedOrder}</span>` : ''}</button>`;
-  }).join('')}</div><div class="selection-summary">${selectedCount ? `已选 ${selectedCount} 页，数字为 PDF 顺序` : '请依次点击要导出的图片'}</div><div class="field"><label>文件名</label><input id="pdfName" value="${escapeHtml(options.name)}"></div><div class="export-options"><div class="field"><label>页面尺寸</label><select id="pageSize"><option value="a4" ${options.pageSize === 'a4' ? 'selected' : ''}>A4（自动横竖）</option><option value="original" ${options.pageSize === 'original' ? 'selected' : ''}>跟随图片尺寸</option></select></div><div class="field"><label>页边距</label><select id="margin"><option value="24" ${options.margin === '24' ? 'selected' : ''}>标准</option><option value="0" ${options.margin === '0' ? 'selected' : ''}>无边距</option><option value="48" ${options.margin === '48' ? 'selected' : ''}>宽边距</option></select></div></div><div class="sheet-actions"><button class="cancel" data-action="close-export">取消</button><button class="export" data-action="download-pdf" ${selectedCount ? '' : 'disabled'}>生成并保存 · ${selectedCount} 页</button></div></div></div>`;
+  }).join('')}</div><div class="selection-summary">${selectedCount ? `已选 ${selectedCount} 页，数字为 PDF 顺序` : '请依次点击要导出的图片'}</div><div class="field"><label>文件名</label><input id="pdfName" value="${escapeHtml(options.name)}"></div><div class="export-options"><div class="field"><label>保存方式</label><select id="destination"><option value="save" ${options.destination === 'save' ? 'selected' : ''}>选择保存位置</option><option value="share" ${options.destination === 'share' ? 'selected' : ''}>系统分享</option></select></div><div class="field"><label>页面尺寸</label><select id="pageSize"><option value="a4" ${options.pageSize === 'a4' ? 'selected' : ''}>A4（自动横竖）</option><option value="original" ${options.pageSize === 'original' ? 'selected' : ''}>跟随图片尺寸</option></select></div><div class="field"><label>页边距</label><select id="margin"><option value="24" ${options.margin === '24' ? 'selected' : ''}>标准</option><option value="0" ${options.margin === '0' ? 'selected' : ''}>无边距</option><option value="48" ${options.margin === '48' ? 'selected' : ''}>宽边距</option></select></div></div><div class="sheet-actions"><button class="cancel" data-action="close-export">取消</button><button class="export" data-action="download-pdf" ${selectedCount ? '' : 'disabled'}>生成并保存 · ${selectedCount} 页</button></div></div></div>`;
 }
 function previewTemplate() {
   const page = state.pages[state.preview]; const external = page.restoration?.externalProcessed;
@@ -58,7 +58,7 @@ function persist() { clearTimeout(saveTimer); state.updatedAt = Date.now(); save
 function newId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function rememberExportOptions() {
   const name = document.querySelector('#pdfName');
-  if (name) state.exportOptions = { name: name.value, pageSize: document.querySelector('#pageSize').value, margin: document.querySelector('#margin').value };
+  if (name) state.exportOptions = { name: name.value, pageSize: document.querySelector('#pageSize').value, margin: document.querySelector('#margin').value, destination: document.querySelector('#destination').value };
 }
 
 async function importFiles(files) {
@@ -119,7 +119,7 @@ async function handleAction(action, index) {
   if (action === 'close-import') { state.importOpen = false; render(); }
   if (action === 'import-original') { state.importOpen = false; render(); document.querySelector('#galleryInput').click(); }
   if (action === 'import-processed') { state.importOpen = false; render(); document.querySelector('#processedInput').click(); }
-  if (action === 'pdf') { state.exportSelection = []; state.exportOptions = { name: state.name, pageSize: 'a4', margin: '24' }; state.exportOpen = true; render(); }
+  if (action === 'pdf') { state.exportSelection = []; state.exportOptions = { name: state.name, pageSize: 'a4', margin: '24', destination: 'save' }; state.exportOpen = true; render(); }
   if (action === 'close-export') { state.exportOpen = false; state.exportSelection = []; state.exportOptions = null; render(); }
   if (action === 'toggle-export-page') {
     rememberExportOptions();
@@ -196,8 +196,16 @@ async function restoreScan(originalDataUrl, corners) {
   return postImage('/api/scan-restore', cropped).then(response => response.json());
 }
 
+async function savePdfInBrowser(blob, fileName) {
+  if ('showSaveFilePicker' in globalThis) {
+    const handle = await globalThis.showSaveFilePicker({ suggestedName: fileName, types: [{ description: 'PDF 文档', accept: { 'application/pdf': ['.pdf'] } }] });
+    const writable = await handle.createWritable(); await writable.write(blob); await writable.close(); return;
+  }
+  const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = fileName; link.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
 async function downloadPdf() {
-  const name = document.querySelector('#pdfName').value.trim() || '扫描文档'; const pageSize = document.querySelector('#pageSize').value; const margin = Number(document.querySelector('#margin').value);
+  const name = document.querySelector('#pdfName').value.trim() || '扫描文档'; const pageSize = document.querySelector('#pageSize').value; const margin = Number(document.querySelector('#margin').value); const destination = document.querySelector('#destination').value;
   const selectedPages = state.exportSelection.map(id => state.pages.find(page => page.id === id)).filter(Boolean);
   if (!selectedPages.length) { notify('请先选择要导出的图片'); return; }
   state.busy = '正在生成 PDF'; state.exportOpen = false; render();
@@ -205,9 +213,13 @@ async function downloadPdf() {
     const pages = [];
     for (const page of selectedPages) { let dataUrl = page.processedDataUrl; let width = page.width, height = page.height; if (!dataUrl) { const restored = await restoreScan(page.originalDataUrl, page.corners); dataUrl = restored.image; width = restored.metadata.width; height = restored.metadata.height; Object.assign(page, { processedDataUrl: dataUrl, width, height, restoration: restored.metadata }); } pages.push({ bytes: dataUrlToBytes(dataUrl), width, height }); }
     const blob = createPdf(pages, { pageSize, margin }); state.name = name; persist(); const fileName = `${name.replace(/[\\/:*?"<>|]/g, '_')}.pdf`;
-    if (await sharePdfNatively(blob, fileName, name)) { /* Native share sheet opened. */ }
+    if (destination === 'save') {
+      const nativeResult = await savePdfNatively(blob, fileName);
+      if (nativeResult?.cancelled) { state.busy = ''; render(); notify('已取消保存'); return; }
+      if (!nativeResult?.saved) await savePdfInBrowser(blob, fileName);
+    } else if (await sharePdfNatively(blob, fileName, name)) { /* Native share sheet opened. */ }
     else if (navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: 'application/pdf' })] })) await navigator.share({ files: [new File([blob], fileName, { type: 'application/pdf' })], title: name });
-    else { const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = fileName; link.click(); setTimeout(() => URL.revokeObjectURL(url), 5000); }
+    else await savePdfInBrowser(blob, fileName);
     state.exportSelection = []; state.exportOptions = null; state.busy = ''; render(); notify(`PDF 已生成 · ${selectedPages.length} 页`);
   } catch (error) { state.busy = ''; notify(`导出失败：${error.message}`); }
 }
